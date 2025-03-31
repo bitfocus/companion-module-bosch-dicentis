@@ -1,12 +1,13 @@
 const { InstanceBase, InstanceStatus, runEntrypoint, combineRgb } = require('@companion-module/base')
 const WebSocket = require('ws')
+const { getActions } = require('./actions')
+const { getFeedbacks } = require('./feedbacks')
+const { updateVariableDefinitions, updateSpecificVariableValues } = require('./variables')
+const { getPresets } = require('./presets')
 
 class BoschDicentisInstance extends InstanceBase {
 	constructor(internal) {
 		super(internal)
-		
-		// Shorter polling interval for more responsive feedback
-		this.POLL_INTERVAL = 100  // 100ms for faster updates
 		
 		this.isInitialized = false
 		this.isLoggedIn = false
@@ -58,24 +59,6 @@ class BoschDicentisInstance extends InstanceBase {
 	}
 
 	initBaseStructures() {
-		// Initialize with just the basic mic_on variable
-		const variableDefinitions = [
-			{
-				variableId: 'Active_Microphone_ScreenLine',
-				name: 'Active Microphone Screen Line',
-			},
-			{
-				variableId: 'Active_Microphone_SeatName',
-				name: 'Active Microphone Seat Name',
-			}
-		]
-		const variables = {
-			Active_Microphone_ScreenLine: '',
-			Active_Microphone_SeatName: ''
-		}
-
-		this.setVariableDefinitions(variableDefinitions)
-		this.setVariableValues(variables)
 
 		// Initialize empty actions
 		this.setActionDefinitions({})
@@ -85,217 +68,16 @@ class BoschDicentisInstance extends InstanceBase {
 
 		// Initialize empty presets
 		this.setPresetDefinitions([])
+
+		updateVariableDefinitions(this)
 	}
 
 	initFeedbacks() {
-		this.setFeedbackDefinitions({
-			mic_state: {
-				type: 'boolean',
-				name: 'Microphone State',
-				description: 'Change button color based on microphone state',
-				defaultStyle: {
-					bgcolor: combineRgb(255, 0, 0),
-				},
-				options: [
-					{
-						type: 'dropdown',
-						label: 'Seat',
-						id: 'seat',
-						default: '',
-						choices: this.getSeatChoices(),
-					},
-				],
-				callback: (feedback) => {
-					const seatId = this.seats[feedback.options.seat]?.seatId
-					if (!seatId) {
-						return false
-					}
-
-					const state = this.isMicrophoneActive(seatId)
-					return state
-				},
-				subscribe: (feedback) => {
-				},
-				unsubscribe: (feedback) => {
-				},
-			},
-			interpreter_state: {
-				type: 'boolean',
-				name: 'Interpreter State',
-				description: 'Change button color based on interpreter state',
-				defaultStyle: {
-					bgcolor: combineRgb(255, 0, 0),
-				},
-				options: [
-					{
-						type: 'dropdown',
-						label: 'Interpreter Seat',
-						id: 'interpreter_seat',
-						default: '',
-						choices: this.getInterpreterSeatChoices(),
-					},
-				],
-				callback: (feedback) => {
-					const seatId = this.interpreterSeats[feedback.options.interpreter_seat]?.seatId
-					if (!seatId) {
-						return false
-					}
-
-					const state = this.isInterpreterActive(seatId)
-					return state
-				},
-				subscribe: (feedback) => {
-				},
-				unsubscribe: (feedback) => {
-				},
-			},
-		})
+		this.setFeedbackDefinitions(getFeedbacks(this))
 	}
 
 	initActions() {
-		const choices = this.getSeatChoices()
-		const interpreterChoices = this.getInterpreterSeatChoices()
-
-		this.setActionDefinitions({
-			custom_command: {
-				name: 'Custom Command',
-				options: [
-					{
-						type: 'textinput',
-						label: 'Operation',
-						id: 'operation',
-						default: '',
-					},
-					{
-						type: 'textinput',
-						label: 'Parameters (JSON)',
-						id: 'parameters',
-						default: '{}',
-					},
-				],
-				callback: async (action) => {
-					try {
-						const parameters = JSON.parse(action.options.parameters)
-						const message = {
-							operation: action.options.operation,
-							parameters: parameters
-						}
-						if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-							this.ws.send(JSON.stringify(message))
-						} else {
-							this.log('error', '[CUSTOM] WebSocket not connected')
-						}
-					} catch (error) {
-						this.log('error', `[CUSTOM] Error parsing parameters JSON: ${error.message}`)
-					}
-				},
-			},
-			toggle_microphone: {
-				name: 'Toggle Microphone',
-				options: [
-					{
-						type: 'dropdown',
-						label: 'Seat',
-						id: 'seat',
-						default: choices[0]?.id || '',
-						choices: choices,
-					},
-				],
-				callback: async (action) => {
-					this.toggleMicrophone(action.options.seat)
-				},
-			},
-			activate_microphone: {
-				name: 'Activate Microphone',
-				options: [
-					{
-						type: 'dropdown',
-						label: 'Seat',
-						id: 'seat',
-						default: choices[0]?.id || '',
-						choices,
-					},
-				],
-				callback: async (action) => {
-					this.activateMicrophone(this.seats[action.options.seat]?.seatId)
-				},
-			},
-			deactivate_microphone: {
-				name: 'Deactivate Microphone',
-				options: [
-					{
-						type: 'dropdown',
-						label: 'Seat',
-						id: 'seat',
-						default: choices[0]?.id || '',
-						choices,
-					},
-				],
-				callback: async (action) => {
-					this.deactivateMicrophone(this.seats[action.options.seat]?.seatId)
-				},
-			},
-			grant_interpretation: {
-				name: 'Grant Interpretation',
-				options: [
-					{
-						type: 'dropdown',
-						label: 'Interpreter Seat',
-						id: 'interpreter_seat',
-						default: interpreterChoices[0]?.id || '',
-						choices: interpreterChoices,
-					},
-					{
-						type: 'dropdown',
-						label: 'State',
-						id: 'state',
-						default: 'off',
-						choices: [
-							{ id: 'off', label: 'Off' },
-							{ id: 'activeOnOutputA', label: 'Active on Output A' },
-							{ id: 'activeOnOutputB', label: 'Active on Output B' },
-							{ id: 'activeOnOutputC', label: 'Active on Output C' }
-						],
-					},
-				],
-				callback: async (action) => {
-					this.grantInterpretation(this.interpreterSeats[action.options.interpreter_seat]?.seatId, action.options.state)
-				},
-			},
-		})
-	}
-
-	updateVariables() {
-		const variables = {
-			Active_Microphone_ScreenLine: '',
-			Active_Microphone_SeatName: ''
-		}
-		const variableDefinitions = [
-			{ name: 'Active_Microphone_ScreenLine', variableId: 'Active_Microphone_ScreenLine' },
-			{ name: 'Active_Microphone_SeatName', variableId: 'Active_Microphone_SeatName' }
-		]
-
-		// Add seat variables
-		Object.entries(this.seats).forEach(([varName, seat]) => {
-			variables[varName] = seat.seatId
-			variableDefinitions.push({
-				variableId: varName,
-				name: varName
-			})
-		})
-
-		// Add interpreter seat variables
-		Object.entries(this.interpreterSeats).forEach(([varName, seat]) => {
-			variables[varName] = seat.seatId
-			variableDefinitions.push({
-				variableId: varName,
-				name: varName
-			})
-		})
-
-		// Set both definitions and values
-		this.setVariableDefinitions(variableDefinitions)
-		this.setVariableValues(variables)
+		this.setActionDefinitions(getActions(this))
 	}
 
 	getSeatChoices() {
@@ -315,98 +97,7 @@ class BoschDicentisInstance extends InstanceBase {
 	}
 
 	initPresets() {
-		const presets = []
-
-		// Create array of seats first
-		const seatsArray = Array.from(Object.entries(this.seats))
-
-		// Create presets for each seat
-		seatsArray.forEach(([varName, seat]) => {
-			presets.push({
-				type: 'button',
-				category: 'Microphones',
-				name: seat.name + '\\n' + seat.screenLine,
-				style: {
-					text: seat.name + '\\n' + seat.screenLine,
-					size: 'auto',
-					color: combineRgb(255, 255, 255),
-					bgcolor: combineRgb(0, 0, 0),
-				},
-				steps: [
-					{
-						down: [
-							{
-								actionId: 'toggle_microphone',
-								options: {
-									seat: varName,
-								},
-							},
-						],
-					}
-				],
-				feedbacks: [
-					{
-						feedbackId: 'mic_state',
-						options: {
-							seat: varName,
-						},
-						style: {
-							bgcolor: combineRgb(255, 0, 0),
-						},
-					},
-				],
-			})
-		})
-
-		// Create presets for each interpreter seat
-		Object.entries(this.interpreterSeats).forEach(([name, seat]) => {
-			presets.push({
-				type: 'button',
-				category: 'Interpreters',
-				name: `Booth ${seat.boothNumber}\\nDesk ${seat.deskNumber}`,
-				style: {
-					text: `Booth ${seat.boothNumber}\\nDesk ${seat.deskNumber}`,
-					size: 'auto',
-					color: combineRgb(255, 255, 255),
-					bgcolor: combineRgb(0, 0, 0),
-				},
-				steps: [
-					{
-						down: [
-							{
-								actionId: 'grant_interpretation',
-								options: {
-									interpreter_seat: name,
-									state: 'activeOnOutputA',
-								},
-							},
-						],
-						up: [
-							{
-								actionId: 'grant_interpretation',
-								options: {
-									interpreter_seat: name,
-									state: 'off',
-								},
-							},
-						],
-					},
-				],
-				feedbacks: [
-					{
-						feedbackId: 'interpreter_state',
-						options: {
-							interpreter_seat: name,
-						},
-						style: {
-							bgcolor: combineRgb(255, 0, 0),
-						},
-					},
-				],
-			})
-		})
-
-		this.setPresetDefinitions(presets)
+		this.setPresetDefinitions(getPresets(this))
 	}
 
 	startPolling() {
@@ -699,10 +390,11 @@ class BoschDicentisInstance extends InstanceBase {
 			}
 		})
 
-		this.updateVariables()
-		this.updateActions()
-		this.updateFeedbacks()
-		this.updatePresets()
+// Update definitions and re-initialize dependent components
+updateVariableDefinitions(this);
+this.initActions(); // Re-init actions to update choices
+this.initFeedbacks(); // Re-init feedbacks to update choices
+this.initPresets(); // Re-init presets to update choices
 	}
 
 	processInterpretationRoutings(response) {
@@ -767,279 +459,6 @@ class BoschDicentisInstance extends InstanceBase {
 		}
 	}
 
-	requestDiscussionList() {
-		if (!this.isLoggedIn) {
-			return
-		}
-
-		const payload = {
-			operation: 'GetDiscussionList',
-			parameters: {}
-		}
-		this.ws.send(JSON.stringify(payload))
-	}
-
-	updateActions() {
-		const choices = this.getSeatChoices()
-		const interpreterChoices = this.getInterpreterSeatChoices()
-
-		this.setActionDefinitions({
-			custom_command: {
-				name: 'Custom Command',
-				options: [
-					{
-						type: 'textinput',
-						label: 'Operation',
-						id: 'operation',
-						default: '',
-					},
-					{
-						type: 'textinput',
-						label: 'Parameters (JSON)',
-						id: 'parameters',
-						default: '{}',
-					},
-				],
-				callback: async (action) => {
-					try {
-						const parameters = JSON.parse(action.options.parameters)
-						const message = {
-							operation: action.options.operation,
-							parameters: parameters
-						}
-						if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-							this.ws.send(JSON.stringify(message))
-						} else {
-							this.log('error', '[CUSTOM] WebSocket not connected')
-						}
-					} catch (error) {
-						this.log('error', `[CUSTOM] Error parsing parameters JSON: ${error.message}`)
-					}
-				},
-			},
-			toggle_microphone: {
-				name: 'Toggle Microphone',
-				options: [
-					{
-						type: 'dropdown',
-						label: 'Seat',
-						id: 'seat',
-						default: choices[0]?.id || '',
-						choices: choices,
-					},
-				],
-				callback: async (action) => {
-					this.toggleMicrophone(action.options.seat)
-				},
-			},
-			activate_microphone: {
-				name: 'Activate Microphone',
-				options: [
-					{
-						type: 'dropdown',
-						label: 'Seat',
-						id: 'seat',
-						default: choices[0]?.id || '',
-						choices,
-					},
-				],
-				callback: async (action) => {
-					this.activateMicrophone(this.seats[action.options.seat]?.seatId)
-				},
-			},
-			deactivate_microphone: {
-				name: 'Deactivate Microphone',
-				options: [
-					{
-						type: 'dropdown',
-						label: 'Seat',
-						id: 'seat',
-						default: choices[0]?.id || '',
-						choices,
-					},
-				],
-				callback: async (action) => {
-					this.deactivateMicrophone(this.seats[action.options.seat]?.seatId)
-				},
-			},
-			grant_interpretation: {
-				name: 'Grant Interpretation',
-				options: [
-					{
-						type: 'dropdown',
-						label: 'Interpreter Seat',
-						id: 'interpreter_seat',
-						default: interpreterChoices[0]?.id || '',
-						choices: interpreterChoices,
-					},
-					{
-						type: 'dropdown',
-						label: 'State',
-						id: 'state',
-						default: 'off',
-						choices: [
-							{ id: 'off', label: 'Off' },
-							{ id: 'activeOnOutputA', label: 'Active on Output A' },
-							{ id: 'activeOnOutputB', label: 'Active on Output B' },
-							{ id: 'activeOnOutputC', label: 'Active on Output C' }
-						],
-					},
-				],
-				callback: async (action) => {
-					this.grantInterpretation(this.interpreterSeats[action.options.interpreter_seat]?.seatId, action.options.state)
-				},
-			},
-		})
-	}
-
-	updateFeedbacks() {
-		this.setFeedbackDefinitions({
-			mic_state: {
-				type: 'boolean',
-				name: 'Microphone State',
-				description: 'Change button color based on microphone state',
-				defaultStyle: {
-					bgcolor: combineRgb(255, 0, 0),
-				},
-				options: [
-					{
-						type: 'dropdown',
-						label: 'Seat',
-						id: 'seat',
-						default: '',
-						choices: this.getSeatChoices(),
-					},
-				],
-				callback: (feedback) => {
-					const seatId = this.seats[feedback.options.seat]?.seatId
-					if (!seatId) {
-						return false
-					}
-
-					const state = this.isMicrophoneActive(seatId)
-					return state
-				},
-			},
-			interpreter_state: {
-				type: 'boolean',
-				name: 'Interpreter State',
-				description: 'Change button color based on interpreter state',
-				defaultStyle: {
-					bgcolor: combineRgb(255, 0, 0),
-				},
-				options: [
-					{
-						type: 'dropdown',
-						label: 'Interpreter Seat',
-						id: 'interpreter_seat',
-						default: '',
-						choices: this.getInterpreterSeatChoices(),
-					},
-				],
-				callback: (feedback) => {
-					const seatId = this.interpreterSeats[feedback.options.interpreter_seat]?.seatId
-					if (!seatId) {
-						return false
-					}
-
-					const state = this.isInterpreterActive(seatId)
-					return state
-				},
-			},
-		})
-	}
-
-	updatePresets() {
-		const presets = []
-
-		// Create presets for each seat
-		Object.entries(this.seats).forEach(([varName, seat]) => {
-			presets.push({
-				type: 'button',
-				category: 'Microphones',
-				name: seat.name + '\\n' + seat.screenLine,
-				style: {
-					text: seat.name + '\\n' + seat.screenLine,
-					size: 'auto',
-					color: combineRgb(255, 255, 255),
-					bgcolor: combineRgb(0, 0, 0),
-				},
-				steps: [
-					{
-						down: [
-							{
-								actionId: 'toggle_microphone',
-								options: {
-									seat: varName,
-								},
-							},
-						],
-					}
-				],
-				feedbacks: [
-					{
-						feedbackId: 'mic_state',
-						options: {
-							seat: varName,
-						},
-						style: {
-							bgcolor: combineRgb(255, 0, 0),
-						},
-					},
-				],
-			})
-		})
-
-		// Create presets for each interpreter seat
-		Object.entries(this.interpreterSeats).forEach(([name, seat]) => {
-			presets.push({
-				type: 'button',
-				category: 'Interpreters',
-				name: `Booth ${seat.boothNumber}\\nDesk ${seat.deskNumber}`,
-				style: {
-					text: `Booth ${seat.boothNumber}\\nDesk ${seat.deskNumber}`,
-					size: 'auto',
-					color: combineRgb(255, 255, 255),
-					bgcolor: combineRgb(0, 0, 0),
-				},
-				steps: [
-					{
-						down: [
-							{
-								actionId: 'grant_interpretation',
-								options: {
-									interpreter_seat: name,
-									state: 'activeOnOutputA',
-								},
-							},
-						],
-						up: [
-							{
-								actionId: 'grant_interpretation',
-								options: {
-									interpreter_seat: name,
-									state: 'off',
-								},
-							},
-						],
-					},
-				],
-				feedbacks: [
-					{
-						feedbackId: 'interpreter_state',
-						options: {
-							interpreter_seat: name,
-						},
-						style: {
-							bgcolor: combineRgb(255, 0, 0),
-						},
-					},
-				],
-			})
-		})
-
-		this.setPresetDefinitions(presets)
-	}
 
 	processSeats(response) {
 		if (!response.parameters?.seats) {
@@ -1087,10 +506,11 @@ class BoschDicentisInstance extends InstanceBase {
 			}
 		})
 
-		this.updateVariables()
-		this.updateActions()
-		this.updateFeedbacks()
-		this.updatePresets()
+// Update definitions and re-initialize dependent components
+updateVariableDefinitions(this);
+this.initActions(); // Re-init actions to update choices
+this.initFeedbacks(); // Re-init feedbacks to update choices
+this.initPresets(); // Re-init presets to update choices
 	}
 
 	grantSpeech(seatId) {
@@ -1167,31 +587,36 @@ class BoschDicentisInstance extends InstanceBase {
 		}
 
 		const discussionList = response.parameters.discussionList
+		// Update the active mic tracking
 		this.activeMics.clear()
-
-		// Process each participant in the discussion list
-		discussionList.forEach(participant => {
+		discussionList.forEach((participant) => {
 			if (participant.microphoneState === 'on') {
 				this.activeMics.add(participant.seatId)
 			}
 		})
-
-		// Update the variables with the screenLine and seatName of the active speaker
-		const variables = {}
-		const activeParticipant = discussionList.find(p => p.microphoneState === 'on')
 		
-		if (activeParticipant) {
+		// Update the variables with the screenLine and seatName of the active speaker
+		let activeScreenLine = '';
+		let activeSeatName = '';
+		if (this.activeMics.size > 0) {
+			const firstActiveSeatId = this.activeMics.values().next().value;
 			// Find the seat info from our stored seats using the seatId
-			const activeSeat = Object.values(this.seats).find(seat => seat.seatId === activeParticipant.seatId)
-			
-			variables['Active_Microphone_ScreenLine'] = activeParticipant.screenLine || ''
-			variables['Active_Microphone_SeatName'] = activeSeat ? activeSeat.name : ''
-		} else {
-			variables['Active_Microphone_ScreenLine'] = ''
-			variables['Active_Microphone_SeatName'] = ''
+			const activeSeat = Object.values(this.seats).find(seat => seat.seatId === firstActiveSeatId);
+			if (activeSeat) {
+				// Use screenLine from discussion list (more accurate) but name from seats list
+				const activeParticipant = discussionList.find(p => p.seatId === firstActiveSeatId);
+				activeScreenLine = activeParticipant?.screenLine || '';
+				activeSeatName = activeSeat.name || '';
+			}
 		}
-
-		this.setVariableValues(variables)
+		
+		// Update the specific variables using the imported function
+		updateSpecificVariableValues(this, {
+			Active_Microphone_ScreenLine: activeScreenLine,
+			Active_Microphone_SeatName: activeSeatName
+		});
+		
+		// Check feedbacks after updating state
 		this.checkFeedbacks('mic_state')
 	}
 
@@ -1213,43 +638,9 @@ class BoschDicentisInstance extends InstanceBase {
 		return state && state !== 'off'
 	}
 
-	getConfigFields() {
-		return [
-			{
-				type: 'textinput',
-				id: 'server_ip',
-				label: 'Server IP',
-				width: 8,
-				regex: '/^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/',
-				required: true
-			},
-			{
-				type: 'textinput',
-				id: 'username',
-				label: 'Username',
-				width: 8,
-				default: 'admin',
-				required: true
-			},
-			{
-				type: 'textinput',
-				id: 'password',
-				label: 'Password',
-				width: 8,
-				default: '',
-				required: false
-			},
-			{
-				type: 'number',
-				id: 'pollInterval',
-				label: 'Poll Interval (ms)',
-				min: 50,
-				max: 1000,
-				default: 100,
-				width: 4,
-				required: true,
-			},
-		]
+	// Add this static method
+	static getConfigFields() {
+		return getConfigFields()
 	}
 
 	async configUpdated(config) {
