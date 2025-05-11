@@ -4,6 +4,7 @@ const { getActions } = require('./actions')
 const { getFeedbacks } = require('./feedbacks')
 const { updateVariableDefinitions, updateSpecificVariableValues } = require('./variables')
 const { getPresets } = require('./presets')
+const configFields = require('./config')
 
 class BoschDicentisInstance extends InstanceBase {
 	constructor(internal) {
@@ -14,7 +15,9 @@ class BoschDicentisInstance extends InstanceBase {
 		this.seats = {}
 		this.interpreterSeats = {}
 		this.interpreterBooths = new Map()
-		this.activeMics = new Set()
+		this.activeMics = []
+		this.previouslyActiveMics = []
+		this.currentLatestActiveSpeakerSeatId = null
 		this.activeInterpreterStates = new Map()
 		this.ws = null
 		this.reconnectTimer = null
@@ -536,7 +539,7 @@ this.initPresets(); // Re-init presets to update choices
 			return
 		}
 
-		if (this.activeMics.has(seat.seatId)) {
+		if (this.activeMics.includes(seat.seatId)) {
 			this.deactivateMicrophone(seat.seatId)
 		} else {
 			this.activateMicrophone(seat.seatId)
@@ -587,35 +590,97 @@ this.initPresets(); // Re-init presets to update choices
 		}
 
 		const discussionList = response.parameters.discussionList
-		// Update the active mic tracking
-		this.activeMics.clear()
+
+		// Store previous active mics to help determine the latest
+		this.previouslyActiveMics = [...this.activeMics]
+
+		// Get current active mic seat IDs from the discussion list
+		const currentActiveMicSeatIds = []
 		discussionList.forEach((participant) => {
 			if (participant.microphoneState === 'on') {
-				this.activeMics.add(participant.seatId)
+				currentActiveMicSeatIds.push(participant.seatId)
 			}
 		})
-		
-		// Update the variables with the screenLine and seatName of the active speaker
-		let activeScreenLine = '';
-		let activeSeatName = '';
-		if (this.activeMics.size > 0) {
-			const firstActiveSeatId = this.activeMics.values().next().value;
-			// Find the seat info from our stored seats using the seatId
-			const activeSeat = Object.values(this.seats).find(seat => seat.seatId === firstActiveSeatId);
-			if (activeSeat) {
-				// Use screenLine from discussion list (more accurate) but name from seats list
-				const activeParticipant = discussionList.find(p => p.seatId === firstActiveSeatId);
-				activeScreenLine = activeParticipant?.screenLine || '';
-				activeSeatName = activeSeat.name || '';
+		this.activeMics = currentActiveMicSeatIds
+
+		// Determine the latest active speaker
+		let newLatestSpeakerFoundThisCycle = false
+		// Check for any newly activated speaker
+		for (const seatId of this.activeMics) {
+			if (!this.previouslyActiveMics.includes(seatId)) {
+				this.currentLatestActiveSpeakerSeatId = seatId
+				newLatestSpeakerFoundThisCycle = true
+				break // Found the newest, take the first one as per Dicentis list order
 			}
 		}
-		
-		// Update the specific variables using the imported function
-		updateSpecificVariableValues(this, {
-			Active_Microphone_ScreenLine: activeScreenLine,
-			Active_Microphone_SeatName: activeSeatName
-		});
-		
+
+		// If no new speaker was found in this cycle,
+		// check if the existing latest speaker is still active.
+		if (!newLatestSpeakerFoundThisCycle) {
+			if (this.currentLatestActiveSpeakerSeatId) { // If we had a latest speaker
+				// And that speaker is no longer active
+				if (!this.activeMics.includes(this.currentLatestActiveSpeakerSeatId)) {
+					// The old latest is gone, pick a new one if any mics are active
+					if (this.activeMics.length > 0) {
+						// Fallback: if the previous latest is off, pick the first from current active list
+						this.currentLatestActiveSpeakerSeatId = this.activeMics[0]
+					} else {
+						// No mics active at all
+						this.currentLatestActiveSpeakerSeatId = null
+					}
+				}
+				// Else: current latest is still active and no new one appeared, so it remains the latest.
+			} else {
+				// We didn't have a latest speaker previously (e.g. startup, or all were off)
+				if (this.activeMics.length > 0) {
+					// If mics are now active, pick the first one
+					this.currentLatestActiveSpeakerSeatId = this.activeMics[0]
+				}
+				// Else: still no mics active, this.currentLatestActiveSpeakerSeatId remains null.
+			}
+		}
+
+		const variableValuesToUpdate = {}
+
+		// Update variables for 1st, 2nd, 3rd active speakers
+		for (let i = 0; i < 3; i++) {
+			const seatId = this.activeMics[i]
+			let screenLine = ''
+			let seatName = ''
+
+			if (seatId) {
+				const activeSeat = Object.values(this.seats).find(s => s.seatId === seatId)
+				if (activeSeat) {
+					const activeParticipant = discussionList.find(p => p.seatId === seatId)
+					screenLine = activeParticipant?.screenLine || ''
+					seatName = activeSeat.name || ''
+				}
+			}
+			variableValuesToUpdate[`${i + 1}st_Active_Speaker_ScreenLine`] = screenLine
+			variableValuesToUpdate[`${i + 1}st_Active_Speaker_SeatName`] = seatName
+		}
+
+		// Update variables for the latest active speaker
+		let latestScreenLine = ''
+		let latestSeatName = ''
+		if (this.currentLatestActiveSpeakerSeatId) {
+			const latestActiveSeat = Object.values(this.seats).find(s => s.seatId === this.currentLatestActiveSpeakerSeatId)
+			if (latestActiveSeat) {
+				const latestParticipant = discussionList.find(p => p.seatId === this.currentLatestActiveSpeakerSeatId)
+				latestScreenLine = latestParticipant?.screenLine || ''
+				latestSeatName = latestActiveSeat.name || ''
+			}
+		}
+		variableValuesToUpdate['Latest_Active_Speaker_ScreenLine'] = latestScreenLine
+		variableValuesToUpdate['Latest_Active_Speaker_SeatName'] = latestSeatName
+
+		// Update the old single active speaker variables for backward compatibility (optional, can be removed)
+		// For now, let's point them to the 1st active speaker
+		variableValuesToUpdate['Active_Microphone_ScreenLine'] = variableValuesToUpdate['1st_Active_Speaker_ScreenLine'] || ''
+		variableValuesToUpdate['Active_Microphone_SeatName'] = variableValuesToUpdate['1st_Active_Speaker_SeatName'] || ''
+
+		updateSpecificVariableValues(this, variableValuesToUpdate)
+
 		// Check feedbacks after updating state
 		this.checkFeedbacks('mic_state')
 	}
@@ -630,7 +695,7 @@ this.initPresets(); // Re-init presets to update choices
 	}
 
 	isMicrophoneActive(seatId) {
-		return this.activeMics.has(seatId)
+		return this.activeMics.includes(seatId)
 	}
 
 	isInterpreterActive(seatId) {
@@ -638,9 +703,8 @@ this.initPresets(); // Re-init presets to update choices
 		return state && state !== 'off'
 	}
 
-	// Add this static method
-	static getConfigFields() {
-		return getConfigFields()
+	getConfigFields() {
+		return configFields
 	}
 
 	async configUpdated(config) {

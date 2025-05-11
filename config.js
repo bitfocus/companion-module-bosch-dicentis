@@ -1,9 +1,7 @@
 // config.js
 const { Regex } = require('@companion-module/base')
 
-module.exports = {
-    getConfigFields() {
-        return [
+const configFields = [
             {
                 type: 'textinput',
                 id: 'server_ip',
@@ -34,5 +32,5 @@ module.exports = {
                 max: 10000,
             },
         ]
-    },
-}
+
+module.exports = configFields; // Added this line to properly export the array
