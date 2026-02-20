@@ -1,5 +1,5 @@
 {
-	"id": "companion-module-bosch-dicentis",
+	"id": "bosch-dicentis",
 	"name": "Bosch Dicentis",
 	"shortname": "dicentis",
 	"description": "Control and monitor Bosch Dicentis conference system",
