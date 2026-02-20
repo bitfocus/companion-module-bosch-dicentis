@@ -1,6 +1,6 @@
 {
 	"name": "bosch-dicentis",
-	"version": "1.1.0",
+	"version": "1.1.1",
 	"description": "Companion module for Bosch Dicentis conference system",
 	"main": "main.js",
 	"scripts": {
