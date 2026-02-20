@@ -23,18 +23,57 @@ module.exports = {
 				callback: async (action) => {
 					try {
 						const parameters = JSON.parse(action.options.parameters)
-						const message = {
-							operation: action.options.operation,
-							parameters: parameters,
-						}
-						if (instance.ws && instance.ws.readyState === WebSocket.OPEN) {
-							instance.ws.send(JSON.stringify(message))
-						} else {
-							instance.log('error', '[CUSTOM] WebSocket not connected')
-						}
+						instance.sendApiMessage(action.options.operation, parameters)
 					} catch (error) {
 						instance.log('error', `[CUSTOM] Error parsing parameters JSON: ${error.message}`)
 					}
+				},
+			},
+			rest_request: {
+				name: 'REST Request',
+				options: [
+					{
+						type: 'dropdown',
+						label: 'Method',
+						id: 'method',
+						default: 'GET',
+						choices: [
+							{ id: 'GET', label: 'GET' },
+							{ id: 'POST', label: 'POST' },
+							{ id: 'PUT', label: 'PUT' },
+							{ id: 'DELETE', label: 'DELETE' },
+						],
+					},
+					{
+						type: 'textinput',
+						label: 'Path',
+						id: 'path',
+						default: '/api',
+					},
+					{
+						type: 'textinput',
+						label: 'Body (JSON, optional)',
+						id: 'body',
+						default: '',
+					},
+				],
+				callback: async (action) => {
+					if (!instance.isRestMode()) {
+						instance.log('warn', '[REST] REST Request action is only used when transport is set to REST')
+						return
+					}
+
+					let body = undefined
+					if (action.options.body && action.options.body.trim() !== '') {
+						try {
+							body = JSON.parse(action.options.body)
+						} catch (error) {
+							instance.log('error', `[REST] Invalid JSON body: ${error.message}`)
+							return
+						}
+					}
+
+					await instance.sendRestRequest(action.options.method, action.options.path, body)
 				},
 			},
 			toggle_microphone: {

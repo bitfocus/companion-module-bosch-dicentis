@@ -12,6 +12,8 @@ module.exports = {
 			{ variableId: '3rd_Active_Speaker_SeatName', name: '3rd Active Speaker Seat Name' },
 			{ variableId: 'Latest_Active_Speaker_ScreenLine', name: 'Latest Active Speaker Screen Line' },
 			{ variableId: 'Latest_Active_Speaker_SeatName', name: 'Latest Active Speaker Seat Name' },
+			{ variableId: 'Latest_Active_Speaker_SeatId', name: 'Latest Active Speaker Seat ID' },
+			{ variableId: 'Latest_Active_Speaker_Number', name: 'Latest Active Speaker Number' },
 		]
 
 		const variableValues = {
@@ -25,6 +27,8 @@ module.exports = {
 			'3rd_Active_Speaker_SeatName': '',
 			'Latest_Active_Speaker_ScreenLine': '',
 			'Latest_Active_Speaker_SeatName': '',
+			'Latest_Active_Speaker_SeatId': '',
+			'Latest_Active_Speaker_Number': '',
 		}
 
 		// Add dynamic seat variables
@@ -60,6 +64,8 @@ module.exports = {
 			'3rd_Active_Speaker_SeatName': variableValues['3rd_Active_Speaker_SeatName'],
 			'Latest_Active_Speaker_ScreenLine': variableValues['Latest_Active_Speaker_ScreenLine'],
 			'Latest_Active_Speaker_SeatName': variableValues['Latest_Active_Speaker_SeatName'],
+			'Latest_Active_Speaker_SeatId': variableValues['Latest_Active_Speaker_SeatId'],
+			'Latest_Active_Speaker_Number': variableValues['Latest_Active_Speaker_Number'],
 		})
 
 		// Note: Dynamic variable values (like specific seat names/IDs) should be updated

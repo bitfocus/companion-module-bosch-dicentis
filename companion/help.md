@@ -1,7 +1,11 @@
 # Bosch Dicentis Companion Module
 
 #### Config
+- **Transport**: Select `DICENTIS API (WebSocket)` for server API or `DICENTIS Wireless (REST)` for DCNM-WAP HTTP API
 - **Server IP**: IP address of the Bosch Dicentis server
+- **REST Port / Protocol**: Used in REST mode (defaults: `80`, `http`)
+- **REST Login Path**: Login endpoint used in REST mode (default: `/api/login`)
+- **REST Command Path**: Command endpoint used for operation payloads in REST mode (default: `/api`)
 - **Username**: Login credentials for API access
 - **Password**: Authentication password
 
@@ -30,6 +34,7 @@ The permissions of logged in user will appear in log for viewing.
 - Activate/Deactivate individual microphones
 - Activate/Deactivate interpreter desks
 - Custom command for testing purposes
+- REST Request (GET/POST/PUT/DELETE with optional JSON body) for wireless REST API endpoints
 
 #### Permissions
 

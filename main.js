@@ -1,4 +1,4 @@
-const { InstanceBase, InstanceStatus, runEntrypoint, combineRgb } = require('@companion-module/base')
+const { InstanceBase, InstanceStatus, runEntrypoint } = require('@companion-module/base')
 const WebSocket = require('ws')
 const { getActions } = require('./actions')
 const { getFeedbacks } = require('./feedbacks')
@@ -29,6 +29,8 @@ class BoschDicentisInstance extends InstanceBase {
 
 		this.discussionList = []
 		this.isConnecting = false
+		this.restSessionCookie = null
+		this.restSid = null
 	}
 
 	// Helper function to sanitize variable names
@@ -37,6 +39,7 @@ class BoschDicentisInstance extends InstanceBase {
 	}
 
 	init(config) {
+		this.log('info', '[MODULE] Loaded build with Latest_Active_Speaker_SeatId support')
 		// Validate config
 		if (!config.server_ip) {
 			this.log('error', '[CONFIG] Server IP is required')
@@ -52,13 +55,142 @@ class BoschDicentisInstance extends InstanceBase {
 		
 		this.config = config
 		this.isInitialized = true
+		this.lastServerIp = config.server_ip
+		this.lastUsername = config.username
+		this.lastPassword = config.password
 		this.updateStatus(InstanceStatus.Ok)
 
 		// Initialize empty structures first with just basic variables
 		this.initBaseStructures()
-		
-		// Connect to device
+
+		if (this.isRestMode()) {
+			this.initActions()
+			this.initFeedbacks()
+			this.initPresets()
+			this.log('info', `[REST] Using wireless REST API at ${this.getRestBaseUrl()}/api`)
+			this.login()
+			return
+		}
+
+		// Connect to device (WebSocket mode)
 		this.initWebSocket()
+	}
+
+	isRestMode() {
+		return this.config?.transport === 'rest'
+	}
+
+	getRestBaseUrl() {
+		const protocol = this.config?.rest_protocol || 'http'
+		const host = this.config?.server_ip || ''
+		const port = this.config?.rest_port || '80'
+		return `${protocol}://${host}:${port}`
+	}
+
+	getRestPath(configValue, fallbackPath, configFieldName) {
+		const configured = typeof configValue === 'string' && configValue.trim() ? configValue.trim() : fallbackPath
+		const normalized = configured.startsWith('/') ? configured : `/${configured}`
+		const username = (this.config?.username || '').trim().toLowerCase()
+		const normalizedLower = normalized.toLowerCase()
+
+		// Guard against config migration issues where username ends up in REST path fields.
+		if (username && normalizedLower === `/${username}`) {
+			this.log(
+				'warn',
+				`[REST] Ignoring invalid ${configFieldName} value "${normalized}". Falling back to "${fallbackPath}".`
+			)
+			return fallbackPath
+		}
+		if (normalizedLower === '/admin') {
+			this.log(
+				'warn',
+				`[REST] Ignoring invalid ${configFieldName} value "${normalized}". Falling back to "${fallbackPath}".`
+			)
+			return fallbackPath
+		}
+
+		return normalized
+	}
+
+	buildRestHeaders(includeJson = true) {
+		const headers = {}
+		if (includeJson) {
+			headers['Content-Type'] = 'application/json'
+		}
+
+		if (this.restSessionCookie) {
+			headers.Cookie = this.restSessionCookie
+		}
+		if (this.restSid) {
+			headers.sid = this.restSid
+		}
+
+		return headers
+	}
+
+	async sendRestRequest(method, path, body) {
+		let normalizedPath = path.startsWith('/') ? path : `/${path}`
+		if (normalizedPath.toLowerCase() === '/admin' || normalizedPath.toLowerCase().startsWith('/admin/')) {
+			this.log('warn', `[REST] Invalid path "${normalizedPath}" detected. Rewriting to "/api/login".`)
+			normalizedPath = '/api/login'
+		}
+		const url = `${this.getRestBaseUrl()}${normalizedPath}`
+
+		const requestOptions = {
+			method,
+			headers: this.buildRestHeaders(body !== undefined),
+		}
+
+		if (body !== undefined) {
+			requestOptions.body = JSON.stringify(body)
+		}
+
+		try {
+			const response = await fetch(url, requestOptions)
+			const setCookie = response.headers.get('set-cookie')
+			if (setCookie) {
+				this.restSessionCookie = setCookie.split(';')[0]
+				const sidMatch = /sid=([^;]+)/i.exec(setCookie)
+				if (sidMatch?.[1]) {
+					this.restSid = sidMatch[1]
+				}
+			}
+
+			const rawResponse = await response.text()
+			let parsedResponse = null
+			if (rawResponse) {
+				try {
+					parsedResponse = JSON.parse(rawResponse)
+				} catch (error) {
+					parsedResponse = rawResponse
+				}
+			}
+
+			if (!response.ok) {
+				this.log('error', `[REST] ${method} ${normalizedPath} failed with ${response.status}: ${rawResponse}`)
+				return null
+			}
+
+			return parsedResponse
+		} catch (error) {
+			this.log('error', `[REST] ${method} ${normalizedPath} request failed: ${error.message}`)
+			return null
+		}
+	}
+
+	sendApiMessage(operation, parameters = {}) {
+		if (this.isRestMode()) {
+			this.log('warn', `[REST] Operation-style command "${operation}" is not supported in wireless REST mode`)
+			return false
+		}
+
+		if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+			this.ws.send(JSON.stringify({ operation, parameters }))
+			return true
+		}
+
+		this.log('error', `[API] Connection not ready for operation: ${operation}`)
+		return false
 	}
 
 	initBaseStructures() {
@@ -111,11 +243,15 @@ class BoschDicentisInstance extends InstanceBase {
 
 		// Send initial requests
 		this.sendDiscussionListRequest()
-		setTimeout(() => this.sendInterpretationRoutingsRequest(), 50)
+		if (!this.isRestMode()) {
+			setTimeout(() => this.sendInterpretationRoutingsRequest(), 50)
+		}
 
 		// Set up continuous polling
 		const discussionListTimer = setInterval(() => this.sendDiscussionListRequest(), pollInterval)
-		const interpretationRoutingsTimer = setInterval(() => this.sendInterpretationRoutingsRequest(), pollInterval)
+		const interpretationRoutingsTimer = this.isRestMode()
+			? null
+			: setInterval(() => this.sendInterpretationRoutingsRequest(), pollInterval)
 
 		// Store timers for cleanup
 		this.pollTimer = {
@@ -125,23 +261,33 @@ class BoschDicentisInstance extends InstanceBase {
 	}
 
 	sendDiscussionListRequest() {
-		if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-			const message = {
-				operation: 'GetDiscussionList',
-				parameters: {}
-			}
-			this.ws.send(JSON.stringify(message))
+		if (this.isRestMode()) {
+			void this.sendRestRequest('GET', '/api/speakers').then((response) => {
+				if (!Array.isArray(response)) {
+					return
+				}
+
+				this.processDiscussionList({
+					parameters: {
+						discussionList: response.map((entry) => ({
+							seatId: entry.id,
+							screenLine: entry.name || '',
+							microphoneState: entry.micOn ? 'on' : 'off',
+						})),
+					},
+				})
+			})
+			return
 		}
+
+		this.sendApiMessage('GetDiscussionList', {})
 	}
 
 	sendInterpretationRoutingsRequest() {
-		if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-			const message = {
-				operation: 'GetInterpretationRoutings',
-				parameters: {}
-			}
-			this.ws.send(JSON.stringify(message))
+		if (this.isRestMode()) {
+			return
 		}
+		this.sendApiMessage('GetInterpretationRoutings', {})
 	}
 
 	stopPolling() {
@@ -154,6 +300,21 @@ class BoschDicentisInstance extends InstanceBase {
 			}
 			this.pollTimer = null
 		}
+	}
+
+	stopWebSocketConnection() {
+		if (this.reconnectTimer) {
+			clearTimeout(this.reconnectTimer)
+			this.reconnectTimer = null
+		}
+
+		if (this.ws) {
+			this.ws.removeAllListeners()
+			this.ws.close()
+			this.ws = null
+		}
+
+		this.isConnecting = false
 	}
 
 	initWebSocket() {
@@ -215,6 +376,9 @@ class BoschDicentisInstance extends InstanceBase {
 
 			this.ws.on('error', (error) => {
 				this.log('error', `[WEBSOCKET] Error: ${error.message}`)
+				if (error.message && error.message.includes('ECONNREFUSED')) {
+					this.log('warn', '[WEBSOCKET] Connection refused. If this is a DCNM-WAP wireless unit, set Transport to "DICENTIS Wireless (REST)".')
+				}
 			})
 
 		} catch (error) {
@@ -224,39 +388,36 @@ class BoschDicentisInstance extends InstanceBase {
 	}
 
 	getPermissions() {
-		if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-			const message = {
-				operation: 'GetPermissions',
-				parameters: {}
-			}
-			this.ws.send(JSON.stringify(message))
-		} else {
-			this.log('error', '[PERMISSIONS] WebSocket not connected')
-		}
+		this.sendApiMessage('GetPermissions', {})
 	}
 
 	getSeats() {
-		if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-			const message = {
-				operation: 'getseats',
-				parameters: {}
-			}
-			this.ws.send(JSON.stringify(message))
-		} else {
-			this.log('error', '[SEATS] WebSocket not connected')
+		if (this.isRestMode()) {
+			void this.sendRestRequest('GET', '/api/seats').then((response) => {
+				if (!Array.isArray(response)) {
+					return
+				}
+
+				this.processSeats({
+					parameters: {
+						seats: response.map((seat) => ({
+							seatId: seat.id,
+							seatName: seat.name || `Seat ${seat.id}`,
+							screenLine: seat.name || '',
+						})),
+					},
+				})
+			})
+			return
 		}
+		this.sendApiMessage('getseats', {})
 	}
 
 	getInterpreterBooths() {
-		if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-			const message = {
-				operation: 'GetInterpreterBooths',
-				parameters: {}
-			}
-			this.ws.send(JSON.stringify(message))
-		} else {
-			this.log('error', '[INTERPRETER] WebSocket not connected')
+		if (this.isRestMode()) {
+			return
 		}
+		this.sendApiMessage('GetInterpreterBooths', {})
 	}
 
 	messageReceivedFromWebSocket(data) {
@@ -320,16 +481,12 @@ class BoschDicentisInstance extends InstanceBase {
 	}
 
 	requestInterpretationRoutings() {
-		if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+		if (!this.isRestMode() && (!this.ws || this.ws.readyState !== WebSocket.OPEN)) {
 			this.log('error', '[INTERPRETER] WebSocket not connected')
 			return
 		}
 
-		const message = {
-			operation: 'GetInterpretationRoutings',
-			parameters: {}
-		}
-		this.ws.send(JSON.stringify(message))
+		this.sendApiMessage('GetInterpretationRoutings', {})
 	}
 
 	processInterpreterBooths(response) {
@@ -351,16 +508,12 @@ class BoschDicentisInstance extends InstanceBase {
 	}
 
 	getInterpreterSeats() {
-		if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+		if (!this.isRestMode() && (!this.ws || this.ws.readyState !== WebSocket.OPEN)) {
 			this.log('error', '[INTERPRETER] WebSocket not connected')
 			return
 		}
 
-		const message = {
-			operation: 'GetInterpreterSeats',
-			parameters: {}
-		}
-		this.ws.send(JSON.stringify(message))
+		this.sendApiMessage('GetInterpreterSeats', {})
 	}
 
 	processInterpreterSeats(response) {
@@ -431,22 +584,44 @@ this.initPresets(); // Re-init presets to update choices
 	}
 
 	grantInterpretation(seatId, state) {
-		if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+		if (this.isRestMode()) {
+			this.log('warn', '[REST] Interpreter controls are not available in DCNM-WAP REST API')
+			return
+		}
+
+		if (!this.isRestMode() && (!this.ws || this.ws.readyState !== WebSocket.OPEN)) {
 			this.log('error', '[INTERPRETER] WebSocket not connected')
 			return
 		}
 
-		const message = {
-			operation: 'GrantInterpretation',
-			parameters: {
-				seatId: seatId,
-				microphoneState: state
-			}
-		}
-		this.ws.send(JSON.stringify(message))
+		this.sendApiMessage('GrantInterpretation', {
+			seatId: seatId,
+			microphoneState: state,
+		})
 	}
 
 	login() {
+		if (this.isRestMode()) {
+			// Wireless API spec defines a fixed login endpoint under /api.
+			const loginPath = '/api/login'
+			this.restSessionCookie = null
+			this.restSid = null
+			this.log('debug', `[REST] Login request path: ${loginPath}`)
+			void this.sendRestRequest('POST', loginPath, {
+				username: this.config.username || '',
+				password: this.config.password || '',
+				override: true,
+			}).then((response) => {
+				if (response !== null) {
+					this.isLoggedIn = true
+					this.updateStatus(InstanceStatus.Ok, 'REST connected')
+					this.getSeats()
+					this.startPolling()
+				}
+			})
+			return
+		}
+
 		const authPayload = {
 			operation: 'login',
 			parameters: {
@@ -517,19 +692,19 @@ this.initPresets(); // Re-init presets to update choices
 	}
 
 	grantSpeech(seatId) {
-		if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+		if (!this.isRestMode() && (!this.ws || this.ws.readyState !== WebSocket.OPEN)) {
 			this.log('error', '[SPEECH] WebSocket not connected')
 			return
 		}
 
-		const message = {
-			operation: 'grantSpeech',
-			parameters: {
-				seatIds: [seatId],
-				participantIds: []
-			}
+		if (this.isRestMode()) {
+			void this.sendRestRequest('POST', '/api/speakers', [seatId])
+			return
 		}
-		this.ws.send(JSON.stringify(message))
+		this.sendApiMessage('grantSpeech', {
+			seatIds: [seatId],
+			participantIds: [],
+		})
 	}
 
 	toggleMicrophone(varName) {
@@ -551,18 +726,19 @@ this.initPresets(); // Re-init presets to update choices
 			return
 		}
 
-		if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+		if (!this.isRestMode() && (!this.ws || this.ws.readyState !== WebSocket.OPEN)) {
 			this.log('error', '[MIC] WebSocket not connected')
 			return
 		}
 
-		const message = {
-			operation: 'grantspeech',
-			parameters: {
-				seatIds: [seatId]
-			}
+		if (this.isRestMode()) {
+			void this.sendRestRequest('POST', '/api/speakers', [seatId])
+			return
 		}
-		this.ws.send(JSON.stringify(message))
+
+		this.sendApiMessage('grantspeech', {
+			seatIds: [seatId],
+		})
 	}
 
 	deactivateMicrophone(seatId) {
@@ -570,18 +746,19 @@ this.initPresets(); // Re-init presets to update choices
 			return
 		}
 
-		if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+		if (!this.isRestMode() && (!this.ws || this.ws.readyState !== WebSocket.OPEN)) {
 			this.log('error', '[MIC] WebSocket not connected')
 			return
 		}
 
-		const message = {
-			operation: 'removespeech',
-			parameters: {
-				seatIds: [seatId]
-			}
+		if (this.isRestMode()) {
+			void this.sendRestRequest('DELETE', `/api/speakers/${seatId}`)
+			return
 		}
-		this.ws.send(JSON.stringify(message))
+
+		this.sendApiMessage('removespeech', {
+			seatIds: [seatId],
+		})
 	}
 
 	processDiscussionList(response) {
@@ -663,7 +840,9 @@ this.initPresets(); // Re-init presets to update choices
 		// Update variables for the latest active speaker
 		let latestScreenLine = ''
 		let latestSeatName = ''
+		let latestSeatId = ''
 		if (this.currentLatestActiveSpeakerSeatId) {
+			latestSeatId = String(this.currentLatestActiveSpeakerSeatId)
 			const latestActiveSeat = Object.values(this.seats).find(s => s.seatId === this.currentLatestActiveSpeakerSeatId)
 			if (latestActiveSeat) {
 				const latestParticipant = discussionList.find(p => p.seatId === this.currentLatestActiveSpeakerSeatId)
@@ -673,6 +852,9 @@ this.initPresets(); // Re-init presets to update choices
 		}
 		variableValuesToUpdate['Latest_Active_Speaker_ScreenLine'] = latestScreenLine
 		variableValuesToUpdate['Latest_Active_Speaker_SeatName'] = latestSeatName
+		variableValuesToUpdate['Latest_Active_Speaker_SeatId'] = latestSeatId
+		const latestSpeakerNumberMatch = latestSeatName.match(/\d+/)
+		variableValuesToUpdate['Latest_Active_Speaker_Number'] = latestSpeakerNumberMatch ? latestSpeakerNumberMatch[0] : latestSeatId
 
 		// Update the old single active speaker variables for backward compatibility (optional, can be removed)
 		// For now, let's point them to the 1st active speaker
@@ -708,6 +890,11 @@ this.initPresets(); // Re-init presets to update choices
 	}
 
 	async configUpdated(config) {
+		const previousServerIp = this.lastServerIp
+		const previousUsername = this.lastUsername
+		const previousPassword = this.lastPassword
+		const previousTransport = this.config?.transport || 'websocket'
+
 		// Store new config
 		this.config = config
 
@@ -724,20 +911,45 @@ this.initPresets(); // Re-init presets to update choices
 			return
 		}
 
-		// If we're already connected and the server details changed, reconnect
-		if (this.isInitialized && 
-			(this.lastServerIp !== config.server_ip || 
-			this.lastUsername !== config.username || 
-			this.lastPassword !== config.password)) {
+		// Handle transport changes explicitly
+		if (previousTransport !== (config.transport || 'websocket')) {
+			this.stopPolling()
+
+			if (config.transport === 'rest') {
+				this.stopWebSocketConnection()
+				this.restSessionCookie = null
+				this.restSid = null
+				this.initActions()
+				this.initFeedbacks()
+				this.initPresets()
+				this.login()
+			} else {
+				this.restSessionCookie = null
+				this.restSid = null
+				this.initWebSocket()
+			}
+		}
+
+		// If we're already connected and the server details changed, reconnect (WebSocket mode)
+		if (!this.isRestMode() && this.isInitialized && 
+			(previousServerIp !== config.server_ip || 
+			previousUsername !== config.username || 
+			previousPassword !== config.password)) {
 			
 			// Close existing connection if any
-			if (this.ws) {
-				this.ws.close()
-			}
+			this.stopWebSocketConnection()
 
 			// Reinitialize connection
 			this.initWebSocket()
 		}
+
+		if (this.isRestMode()) {
+			this.login()
+		}
+
+		this.lastServerIp = config.server_ip
+		this.lastUsername = config.username
+		this.lastPassword = config.password
 
 		this.updateStatus(InstanceStatus.Ok)
 	}
