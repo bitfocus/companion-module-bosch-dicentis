@@ -3,7 +3,7 @@
 	"name": "Bosch Dicentis",
 	"shortname": "dicentis",
 	"description": "Control and monitor Bosch Dicentis conference system",
-	"version": "1.1.1",
+	"version": "1.1.2",
 	"license": "MIT",
 	"repository": "https://github.com/bitfocus/companion-module-bosch-dicentis.git",
 	"bugs": "https://github.com/bitfocus/companion-module-bosch-dicentis/issues",
@@ -15,7 +15,7 @@
 	],
 	"legacyIds": [],
 	"runtime": {
-		"type": "node18",
+		"type": "node22",
 		"api": "nodejs-ipc",
 		"apiVersion": "0.0.0",
 		"entrypoint": "../main.js"
