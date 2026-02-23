@@ -3,7 +3,7 @@
 	"name": "Bosch Dicentis",
 	"shortname": "dicentis",
 	"description": "Control and monitor Bosch Dicentis conference system",
-	"version": "1.1.2",
+	"version": "1.1.0",
 	"license": "MIT",
 	"repository": "https://github.com/bitfocus/companion-module-bosch-dicentis.git",
 	"bugs": "https://github.com/bitfocus/companion-module-bosch-dicentis/issues",

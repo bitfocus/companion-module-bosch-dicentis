@@ -22,32 +22,27 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@companion-module/tools@npm:^2.3.0":
-  version: 2.6.1
-  resolution: "@companion-module/tools@npm:2.6.1"
+"@companion-module/tools@npm:2.3.0":
+  version: 2.3.0
+  resolution: "@companion-module/tools@npm:2.3.0"
   dependencies:
-    "@eslint/js": "npm:^9.39.2"
-    eslint-config-prettier: "npm:^10.1.8"
-    eslint-plugin-n: "npm:^17.23.2"
-    eslint-plugin-prettier: "npm:^5.5.5"
+    "@eslint/js": "npm:^9.19.0"
+    eslint-config-prettier: "npm:^10.0.1"
+    eslint-plugin-n: "npm:^17.15.1"
+    eslint-plugin-prettier: "npm:^5.2.3"
     find-up: "npm:^7.0.0"
     parse-author: "npm:^2.0.0"
-    semver: "npm:^7.7.3"
-    tar: "npm:^7.5.7"
-    webpack: "npm:^5.104.1"
+    semver: "npm:^7.7.1"
+    tar: "npm:^7.4.3"
+    webpack: "npm:^5.97.1"
     webpack-cli: "npm:^6.0.1"
-    zx: "npm:^8.8.5"
+    zx: "npm:^8.3.2"
   peerDependencies:
-    "@companion-module/base": ^1.12.0
-    "@companion-surface/base": ^1.0.0
-    eslint: ^9.36.0
-    prettier: ^3.6.2
-    typescript-eslint: ^8.44.1
+    "@companion-module/base": ^1.11.0
+    eslint: ^9.0.0
+    prettier: ^3.0.0
+    typescript-eslint: ^8.2.0
   peerDependenciesMeta:
-    "@companion-module/base":
-      optional: true
-    "@companion-surface/base":
-      optional: true
     eslint:
       optional: true
     prettier:
@@ -55,12 +50,10 @@ __metadata:
     typescript-eslint:
       optional: true
   bin:
-    companion-generate-manifest: scripts/generate-connection-manifest.js
-    companion-module-build: scripts/build-connection.js
-    companion-module-check: scripts/check-connection.js
-    companion-surface-build: scripts/build-surface.js
-    companion-surface-check: scripts/check-surface.js
-  checksum: 10c0/404718c14d6c9bb1747633efbbf0f07c24c9584d8db5feb7f9324575c144ca044c35d0a99fb6d21929902ce39019b872b8ec393423fb100ae2d1ad10b8c62934
+    companion-generate-manifest: scripts/generate-manifest.js
+    companion-module-build: scripts/build.js
+    companion-module-check: scripts/check.js
+  checksum: 10c0/49baa2415a62e9763d8d185d3d944a68cbfb5e41f2d382a0d8e0cd69902ccc4a80a92783a0ab95c9b5fbc0ca4464c028423bb5fc3347149cd1bae1ab6bf4b10c
   languageName: node
   linkType: hard
 
@@ -89,7 +82,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@eslint/js@npm:^9.39.2":
+"@eslint/js@npm:^9.19.0":
   version: 9.39.2
   resolution: "@eslint/js@npm:9.39.2"
   checksum: 10c0/00f51c52b04ac79faebfaa65a9652b2093b9c924e945479f1f3945473f78aee83cbc76c8d70bbffbf06f7024626575b16d97b66eab16182e1d0d39daff2f26f5
@@ -473,7 +466,7 @@ __metadata:
   resolution: "bosch-dicentis@workspace:."
   dependencies:
     "@companion-module/base": "npm:~1.12.0"
-    "@companion-module/tools": "npm:^2.3.0"
+    "@companion-module/tools": "npm:2.3.0"
     object-path: "npm:^0.11.8"
     ws: "npm:^7.5.10"
   languageName: unknown
@@ -630,7 +623,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"eslint-config-prettier@npm:^10.1.8":
+"eslint-config-prettier@npm:^10.0.1":
   version: 10.1.8
   resolution: "eslint-config-prettier@npm:10.1.8"
   peerDependencies:
@@ -654,7 +647,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"eslint-plugin-n@npm:^17.23.2":
+"eslint-plugin-n@npm:^17.15.1":
   version: 17.24.0
   resolution: "eslint-plugin-n@npm:17.24.0"
   dependencies:
@@ -673,7 +666,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"eslint-plugin-prettier@npm:^5.5.5":
+"eslint-plugin-prettier@npm:^5.2.3":
   version: 5.5.5
   resolution: "eslint-plugin-prettier@npm:5.5.5"
   dependencies:
@@ -1301,7 +1294,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"semver@npm:^7.5.4, semver@npm:^7.6.3, semver@npm:^7.7.3":
+"semver@npm:^7.5.4, semver@npm:^7.6.3, semver@npm:^7.7.1":
   version: 7.7.4
   resolution: "semver@npm:7.7.4"
   bin:
@@ -1393,7 +1386,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"tar@npm:^7.5.7":
+"tar@npm:^7.4.3":
   version: 7.5.9
   resolution: "tar@npm:7.5.9"
   dependencies:
@@ -1546,7 +1539,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"webpack@npm:^5.104.1":
+"webpack@npm:^5.97.1":
   version: 5.105.2
   resolution: "webpack@npm:5.105.2"
   dependencies:
@@ -1631,7 +1624,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"zx@npm:^8.8.5":
+"zx@npm:^8.3.2":
   version: 8.8.5
   resolution: "zx@npm:8.8.5"
   bin:
