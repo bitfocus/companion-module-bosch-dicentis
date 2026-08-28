@@ -28,6 +28,6 @@
 	},
 	"packageManager": "yarn@4.12.0",
 	"devDependencies": {
-		"@companion-module/tools": "2.3.0"
+		"@companion-module/tools": "2.8.0"
 	}
 }
